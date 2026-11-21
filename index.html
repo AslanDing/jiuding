@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<title>九鼎 · 猎兽铸鼎</title>
+		<style>
+html, body, #canvas { margin: 0; padding: 0; border: 0; }
+body { color: #e2d8bf; background-color: #0e0d0c; overflow: hidden; touch-action: none; height: 100%; }
+/* The canvas is sized by fitCanvas() (backing = floor(css * dpr)); never set width/height here. */
+#canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+#canvas:focus { outline: none; }
+#status { position: absolute; inset: 0; background: #0e0d0c; display: flex; flex-direction: column; justify-content: center;
+	align-items: center; visibility: hidden; gap: 18px; font: 14px "Microsoft YaHei", "PingFang SC", sans-serif; }
+#title { font-size: 44px; letter-spacing: 18px; color: #dcb269; text-shadow: 0 2px 0 #3d2a15; margin-left: 18px; }
+#subtitle { font-size: 13px; color: #8f7b5a; letter-spacing: 3px; margin-top: -10px; }
+#status-progress { width: 260px; height: 6px; appearance: none; border: 1px solid #664620; background: #1b1916; }
+#status-progress::-webkit-progress-bar { background: #1b1916; }
+#status-progress::-webkit-progress-value { background: #b88a45; }
+#status-progress::-moz-progress-bar { background: #b88a45; }
+#controls { display: flex; gap: 18px; }
+.ctl { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 86px; }
+.keys { display: flex; gap: 3px; align-items: flex-end; min-height: 46px; }
+.key { min-width: 20px; height: 20px; padding: 0 4px; border: 1px solid #b88a45; background: #2a2622; color: #f3dc9c;
+	font: 12px monospace; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 0 #3d2a15; }
+.col { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.mouse { width: 26px; height: 38px; border: 1px solid #b88a45; border-radius: 13px 13px 12px 12px; background: #2a2622; position: relative; overflow: hidden; }
+.mouse::after { content: ""; position: absolute; left: 12px; top: 0; width: 1px; height: 15px; background: #b88a45; }
+.mouse .l, .mouse .r { position: absolute; top: 0; width: 12px; height: 15px; }
+.mouse .l { left: 0; } .mouse .r { right: 0; }
+.mouse .on { background: #dcb269; }
+.cap { font-size: 12px; color: #bfb39a; }
+#status-start { display: none; font: 16px "Microsoft YaHei", sans-serif; color: #1b1916; background: #dcb269; border: 0;
+	padding: 8px 28px; cursor: pointer; letter-spacing: 4px; box-shadow: 0 0 0 2px #0e0d0c, 0 0 0 3px #b88a45; }
+#status-start:hover, #status-start:focus { background: #f3dc9c; outline: none; }
+#status-hint { font-size: 12px; color: #7d6e55; text-align: center; line-height: 1.7; }
+#status-notice { display: none; background: #3a0c0c; border: 1px solid #a3241e; color: #e2d8bf; padding: 1rem; margin: 0 2rem; text-align: center; line-height: 1.5; }
+#home { position: fixed; left: 12px; top: 10px; z-index: 5; color: #bfb39a; font: 13px sans-serif; text-decoration: none; opacity: 0.7; transition: opacity 0.4s; }
+#home.hidden { opacity: 0; pointer-events: none; }
+		</style>
+		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+<script>window.JIUDING_DEMO = true;</script>
+	</head>
+	<body>
+		<canvas id="canvas">你的浏览器不支持 canvas。</canvas>
+		<noscript>需要启用 JavaScript。</noscript>
+		<a id="home" href="/">← 返回主页</a>
+		<div id="status">
+			<div id="title">九鼎</div>
+			<div id="subtitle">夏代猎师 · 山海经异兽 · 铸鼎象物</div>
+			<div id="controls">
+				<div class="ctl"><div class="keys"><div class="col"><div class="key">W</div><div class="keys" style="min-height:0"><div class="key">A</div><div class="key">S</div><div class="key">D</div></div></div></div><div class="cap">移动</div></div>
+				<div class="ctl"><div class="keys"><div class="mouse"><div class="l on"></div><div class="r"></div></div></div><div class="cap">轻击 · 攒劲</div></div>
+				<div class="ctl"><div class="keys"><div class="mouse"><div class="l"></div><div class="r on"></div></div></div><div class="cap">重击 · 按住蓄力</div></div>
+				<div class="ctl"><div class="keys"><div class="key" style="min-width:70px">空格</div></div><div class="cap">闪避</div></div>
+			</div>
+			<progress id="status-progress"></progress>
+			<button id="status-start" type="button">点击开始</button>
+			<div id="status-hint">鼠标决定朝向 · Q 掷钺 / 回钺 · E 镇兽印 · R 取材 / 伏杀 · 1 药草 · Esc 暂停<br>
+				推荐桌面版 Chrome / Edge / Firefox · 存档保存在本浏览器</div>
+			<div id="status-notice"></div>
+		</div>
+
+		<script>
+// ---- 九鼎 shell additions (docs/06 §3, §10; after game0/09 §5) -------------------------------------------
+(function () {
+	const params = new URLSearchParams(window.location.search);
+	const debug = params.get('debug') === '1';
+	const canvas = () => document.getElementById('canvas');
+	// exact canvas sizing (export uses canvas_resize_policy = None): backing = floor(css * dpr), css = backing / dpr
+	function fitCanvas() {
+		const c = canvas();
+		const dpr = window.devicePixelRatio || 1;
+		const cw = document.documentElement.clientWidth || window.innerWidth;
+		const ch = document.documentElement.clientHeight || window.innerHeight;
+		const w = Math.max(1, Math.floor(cw * dpr + 1e-4));
+		const h = Math.max(1, Math.floor(ch * dpr + 1e-4));
+		if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+		c.style.width = (w / dpr) + 'px';
+		c.style.height = (h / dpr) + 'px';
+	}
+	window.addEventListener('resize', fitCanvas);
+	(function watchDpr() {
+		const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+		mq.addEventListener('change', () => { fitCanvas(); watchDpr(); }, { once: true });
+	}());
+	fitCanvas();
+	// mirror console output so ego-browser can read engine logs
+	window.__gdLogs = [];
+	for (const k of ['log', 'warn', 'error']) {
+		const orig = console[k].bind(console);
+		console[k] = (...a) => {
+			window.__gdLogs.push([k, Date.now(), a.map(String).join(' ')]);
+			if (window.__gdLogs.length > 3000) window.__gdLogs.shift();
+			orig(...a);
+		};
+	}
+	window.addEventListener('error', (e) => window.__gdLogs.push(['error', Date.now(), String(e.message)]));
+	// browser-reserved keys: no scrolling, searching or help while the game has focus (F5 / F11 / F12 still work)
+	const BLOCK = new Set(['Tab', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', '/', "'", 'F1', 'F2', 'F3', 'F4']);
+	window.addEventListener('keydown', (e) => { if (document.activeElement === canvas() && BLOCK.has(e.key)) e.preventDefault(); });
+	window.addEventListener('wheel', (e) => { if (e.target === canvas()) e.preventDefault(); }, { passive: false });
+	window.addEventListener('contextmenu', (e) => { if (e.target === canvas()) e.preventDefault(); });
+	for (const t of ['mousedown', 'mouseup', 'auxclick']) {
+		window.addEventListener(t, (e) => { if (e.target === canvas() && e.button >= 1) e.preventDefault(); });
+	}
+	// leaving mid-hunt asks first; the game sets window.__inRun
+	window.addEventListener('beforeunload', (e) => { if (window.__inRun) { e.preventDefault(); e.returnValue = ''; } });
+	// the back-to-homepage link: hidden in iframes and debug captures, fades when the mouse rests
+	const home = document.getElementById('home');
+	// 试玩版 (the "Web Demo" preset puts window.JIUDING_DEMO in the head): it lives on the homepage's games page
+	if (window.JIUDING_DEMO) {
+		document.title = '九鼎 · 试玩版';
+		document.getElementById('subtitle').textContent = '试玩版 · 豫州　夏代猎师 · 山海经异兽 · 铸鼎象物';
+		home.href = '/others/#games';
+		home.textContent = '← 全部游戏';
+	}
+	if (window.self !== window.top || debug) home.remove();
+	let hideTimer = 0;
+	window.addEventListener('mousemove', (e) => {
+		if (!home.isConnected) return;
+		if (e.clientY < 60) home.classList.remove('hidden');
+		clearTimeout(hideTimer);
+		hideTimer = setTimeout(() => home.classList.add('hidden'), 3000);
+	});
+	// phones: say so up front (docs/04 §8, original design "风险与对策")
+	if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) {
+		document.getElementById('status-hint').innerHTML = '请用电脑（键盘鼠标）或手柄游玩<br>' + document.getElementById('status-hint').innerHTML;
+	}
+}());
+		</script>
+
+		<script src="index.js"></script>
+		<script>
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":11628172,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_THREADS_ENABLED = false;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const statusOverlay = document.getElementById('status');
+	const statusProgress = document.getElementById('status-progress');
+	const statusNotice = document.getElementById('status-notice');
+	let initializing = true;
+	let statusMode = '';
+
+	function setStatusMode(mode) {
+		if (statusMode === mode || !initializing) return;
+		if (mode === 'hidden') {
+			statusOverlay.remove();
+			initializing = false;
+			return;
+		}
+		statusOverlay.style.visibility = 'visible';
+		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
+		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
+		statusMode = mode;
+	}
+
+	function displayFailureNotice(err) {
+		console.error(err);
+		const msg = err instanceof Error ? err.message : (typeof err === 'string' ? err : '发生未知错误。');
+		statusNotice.textContent = msg + '\n请使用最新版 Chrome / Edge / Firefox 桌面浏览器。';
+		setStatusMode('notice');
+		initializing = false;
+	}
+
+	const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+	if (missing.length !== 0) {
+		displayFailureNotice('缺少运行所需的浏览器功能：\n' + missing.join('\n'));
+		return;
+	}
+	// download first, start on a click: the click is the user gesture browsers need before audio may play.
+	// ?autostart=1 (tests, ego lite) skips it.
+	setStatusMode('progress');
+	const startButton = document.getElementById('status-start');
+	const params = new URLSearchParams(window.location.search);
+	const exe = GODOT_CONFIG.executable;
+	const pack = GODOT_CONFIG.mainPack || (exe + '.pck');
+	engine.config.update({
+		'onProgress': function (current, total) {
+			if (current > 0 && total > 0) {
+				statusProgress.value = current;
+				statusProgress.max = total;
+			} else {
+				statusProgress.removeAttribute('value');
+				statusProgress.removeAttribute('max');
+			}
+		},
+	});
+	engine.config.args = ['--main-pack', pack].concat(engine.config.args);
+	function run() {
+		startButton.disabled = true;
+		engine.start().then(() => {
+			setStatusMode('hidden');
+			const c = document.getElementById('canvas');
+			if (c) c.focus();
+		}, displayFailureNotice);
+	}
+	Promise.all([engine.init(exe), engine.preloadFile(pack, pack)]).then(() => {
+		if (params.get('autostart') === '1') {
+			run();
+			return;
+		}
+		statusProgress.style.display = 'none';
+		startButton.style.display = 'block';
+		startButton.focus();
+		startButton.addEventListener('click', run, { once: true });
+	}, displayFailureNotice);
+}());
+		</script>
+	</body>
+</html>
+
